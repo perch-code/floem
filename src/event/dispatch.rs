@@ -1359,7 +1359,7 @@ impl RouteCx<'_, '_> {
 impl RouteCx<'_, '_> {
     /// Update focus to a new element, firing FocusGained/FocusLost events.
     pub fn update_focus(&mut self, element_id: ElementId, keyboard_navigation: bool) {
-        let mut new_focus = self.resolve_focus_targets(element_id, keyboard_navigation);
+        let mut new_focus = self.resolve_focus_targets(element_id);
         new_focus.reverse();
 
         let old_focus_path: SmallVec<[ElementId; 16]> = self
@@ -1492,12 +1492,15 @@ impl RouteCx<'_, '_> {
     }
 
     /// Walk up from `target` to find the first ancestor (or self) that is
-    /// visible and focusable (or keyboard-navigable if using keyboard nav).
-    fn resolve_focus_targets(
-        &self,
-        target: ElementId,
-        keyboard_navigation: bool,
-    ) -> SmallVec<[ElementId; 16]> {
+    /// visible and focusable.
+    ///
+    /// Any focusable view qualifies, whether or not keyboard navigation is
+    /// in use: Tab and the arrow keys only ever pass a keyboard-navigable
+    /// view, which this finds as itself, and a programmatic request must
+    /// still reach a view that allows programmatic focus but is outside the
+    /// Tab order. `keyboard_navigation` decides how the focus is shown, not
+    /// which view can take it.
+    fn resolve_focus_targets(&self, target: ElementId) -> SmallVec<[ElementId; 16]> {
         let box_tree = self.gcx.window_state.box_tree.borrow();
         let ancestors = || {
             std::iter::successors(Some(target), |&cur| {
@@ -1507,13 +1510,7 @@ impl RouteCx<'_, '_> {
             })
         };
 
-        let focus_target = ancestors().find(|&id| {
-            if keyboard_navigation {
-                Self::is_effectively_keyboard_navigable(&box_tree, id)
-            } else {
-                Self::is_effectively_focusable(&box_tree, id)
-            }
-        });
+        let focus_target = ancestors().find(|&id| Self::is_effectively_focusable(&box_tree, id));
 
         let Some(focus_target) = focus_target else {
             return SmallVec::new();

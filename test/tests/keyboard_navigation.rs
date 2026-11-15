@@ -836,3 +836,50 @@ fn tab_order_after_tab_page_switch_stays_forward() {
         "Button page tab order should continue forward"
     );
 }
+
+#[test]
+fn programmatic_focus_after_tab_reaches_a_focusable_view() {
+    // `.focusable()` allows programmatic focus but keeps a view out of the
+    // Tab order. Once Tab has been used, a request for it must still land
+    // on it, not be dropped for want of a keyboard-navigable view.
+    let root = TestRoot::new();
+    let a = Empty::new().style(|s| s.size(80.0, 40.0).keyboard_navigable());
+    let a_id = a.view_id();
+    let b = Empty::new().style(|s| s.size(80.0, 40.0).focusable());
+    let b_id = b.view_id();
+    let view = Stack::horizontal((a, b)).style(|s| s.size(200.0, 40.0));
+
+    let mut harness = HeadlessHarness::new_with_size(root, view, 200.0, 40.0);
+    press_tab(&mut harness);
+    assert!(harness.is_focused(a_id));
+
+    b_id.request_focus();
+    harness.process_update_no_paint();
+    assert!(
+        harness.is_focused(b_id),
+        "A programmatic request should focus a focusable view after Tab"
+    );
+
+    // Tab still skips it.
+    press_tab(&mut harness);
+    assert!(harness.is_focused(a_id));
+}
+
+#[test]
+fn programmatic_focus_after_tab_stays_on_a_focusable_child() {
+    // A focusable view inside a keyboard-navigable one takes the request
+    // itself rather than passing it up to its parent.
+    let root = TestRoot::new();
+    let child = Empty::new().style(|s| s.size(40.0, 20.0).focusable());
+    let child_id = child.view_id();
+    let parent = Container::new(child).style(|s| s.size(80.0, 40.0).keyboard_navigable());
+    let parent_id = parent.view_id();
+
+    let mut harness = HeadlessHarness::new_with_size(root, parent, 80.0, 40.0);
+    press_tab(&mut harness);
+    assert!(harness.is_focused(parent_id));
+
+    child_id.request_focus();
+    harness.process_update_no_paint();
+    assert!(harness.is_focused(child_id));
+}
