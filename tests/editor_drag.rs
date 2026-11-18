@@ -1,6 +1,8 @@
+use floem::event::Event;
 use floem::headless::{HeadlessHarness, TestRoot};
 use floem::kurbo::Point;
-use floem::reactive::SignalWith;
+use floem::reactive::{SignalGet, SignalWith};
+use floem::ui_events::keyboard::{Code, Key, KeyState, KeyboardEvent, Modifiers, NamedKey};
 use floem::ui_events::pointer::PointerState;
 use floem::views::editor::Editor;
 use floem::views::editor::core::cursor::CursorAffinity;
@@ -124,4 +126,131 @@ fn dragging_after_a_click_still_selects_by_characters() {
 
     ed.pointer_move(&pointer_at(&ed, 11, 0));
     assert_eq!(selection(&ed), (6, 11));
+}
+
+/// An editor with the keyboard, as a press on it leaves it.
+fn focused_editor() -> (HeadlessHarness, Editor) {
+    let (mut harness, ed) = editor();
+    let view = ed
+        .editor_view_id
+        .get_untracked()
+        .expect("the editor's view");
+    view.request_focus();
+    harness.rebuild();
+    assert!(harness.is_focused(view), "the editor takes the keyboard");
+    (harness, ed)
+}
+
+fn key(key: Key, code: Code, modifiers: Modifiers) -> Event {
+    Event::Key(KeyboardEvent {
+        state: KeyState::Down,
+        key,
+        code,
+        location: Default::default(),
+        modifiers,
+        repeat: false,
+        is_composing: false,
+    })
+}
+
+/// A trackpad's tap-drag and three-finger drag hold the button for a
+/// moment after the fingers lift, so Backspace can come before the
+/// release. The pointer's next move used to select again, from the caret
+/// Backspace left to wherever the pointer went.
+#[test]
+fn a_key_that_edits_ends_the_drag() {
+    let (mut harness, ed) = focused_editor();
+    ed.pointer_down_primary(&pointer_at(&ed, 20, 1));
+    ed.pointer_move(&pointer_at(&ed, 25, 0));
+    assert_eq!(selection(&ed), (20, 25), "the drag selects");
+
+    harness.dispatch_event(key(
+        Key::Named(NamedKey::Backspace),
+        Code::Backspace,
+        Modifiers::empty(),
+    ));
+    assert_eq!(
+        ed.doc().text().to_string(),
+        "the quick brown fox\n over\nthe lazy dog\n"
+    );
+    assert_eq!(selection(&ed), (20, 20), "Backspace takes the selection");
+
+    ed.pointer_move(&pointer_at(&ed, 6, 0));
+    assert_eq!(selection(&ed), (20, 20), "and the pointer selects no more");
+
+    ed.pointer_up(&pointer_at(&ed, 6, 0));
+    assert_eq!(selection(&ed), (20, 20));
+}
+
+#[test]
+fn a_typed_character_ends_the_drag() {
+    let (mut harness, ed) = focused_editor();
+    ed.pointer_down_primary(&pointer_at(&ed, 20, 1));
+    ed.pointer_move(&pointer_at(&ed, 25, 0));
+
+    harness.dispatch_event(key(
+        Key::Character("x".into()),
+        Code::KeyX,
+        Modifiers::empty(),
+    ));
+    assert_eq!(
+        ed.doc().text().to_string(),
+        "the quick brown fox\nx over\nthe lazy dog\n"
+    );
+    assert_eq!(selection(&ed), (21, 21));
+
+    ed.pointer_move(&pointer_at(&ed, 6, 0));
+    assert_eq!(selection(&ed), (21, 21), "the pointer selects no more");
+}
+
+#[test]
+fn a_key_that_moves_the_caret_ends_the_drag() {
+    let (mut harness, ed) = focused_editor();
+    ed.pointer_down_primary(&pointer_at(&ed, 20, 1));
+    ed.pointer_move(&pointer_at(&ed, 25, 0));
+
+    harness.dispatch_event(key(
+        Key::Named(NamedKey::ArrowRight),
+        Code::ArrowRight,
+        Modifiers::empty(),
+    ));
+    let caret = selection(&ed);
+    assert_eq!(caret.0, caret.1, "the arrow leaves a caret");
+
+    ed.pointer_move(&pointer_at(&ed, 6, 0));
+    assert_eq!(selection(&ed), caret, "the pointer selects no more");
+}
+
+/// A modifier on its own is no command: Shift goes down in the middle of
+/// many drags, and the drag goes on.
+#[test]
+fn a_modifier_alone_leaves_the_drag_going() {
+    let (mut harness, ed) = focused_editor();
+    ed.pointer_down_primary(&pointer_at(&ed, 20, 1));
+    ed.pointer_move(&pointer_at(&ed, 25, 0));
+
+    harness.dispatch_event(key(
+        Key::Named(NamedKey::Shift),
+        Code::ShiftLeft,
+        Modifiers::SHIFT,
+    ));
+    ed.pointer_move(&pointer_at(&ed, 27, 0));
+    assert_eq!(selection(&ed), (20, 27));
+}
+
+#[test]
+fn the_press_after_a_key_ended_a_drag_drags_again() {
+    let (mut harness, ed) = focused_editor();
+    ed.pointer_down_primary(&pointer_at(&ed, 20, 1));
+    ed.pointer_move(&pointer_at(&ed, 25, 0));
+    harness.dispatch_event(key(
+        Key::Named(NamedKey::Backspace),
+        Code::Backspace,
+        Modifiers::empty(),
+    ));
+    ed.pointer_up(&pointer_at(&ed, 6, 0));
+
+    ed.pointer_down_primary(&pointer_at(&ed, 4, 1));
+    ed.pointer_move(&pointer_at(&ed, 9, 0));
+    assert_eq!(selection(&ed), (4, 9));
 }

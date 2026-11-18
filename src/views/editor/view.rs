@@ -1447,6 +1447,15 @@ fn editor_content(
                     // no default action follows it: Alt with an arrow moves
                     // the cursor by a word or the line up or down, and must
                     // not also walk the focus off to a neighbour.
+                    //
+                    // It also ends a drag, as a typed character does below.
+                    // A trackpad's tap-drag and three-finger drag hold the
+                    // button for a moment after the fingers lift, so a key
+                    // can come before the release: Delete took the
+                    // selection, and the pointer's next move selected again
+                    // from the caret Delete left. Once a key has edited the
+                    // text or moved the caret, the selection is the
+                    // keyboard's until the next press.
                     if handle_key_event(KeypressKey {
                         key: key.clone(),
                         modifiers: *modifiers,
@@ -1454,6 +1463,7 @@ fn editor_content(
                     {
                         cx.prevent_default();
                         cx.window_state.request_paint(cx.target);
+                        editor.get_untracked().end_drag();
                     }
 
                     let mut mods = *modifiers;
@@ -1466,7 +1476,9 @@ fn editor_content(
                         && let Key::Character(c) = &key
                     {
                         cx.window_state.request_paint(cx.target);
-                        editor.get_untracked().receive_char(c);
+                        let editor = editor.get_untracked();
+                        editor.end_drag();
+                        editor.receive_char(c);
                     }
                     EventPropagation::Stop
                 },

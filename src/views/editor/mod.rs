@@ -717,7 +717,15 @@ impl Editor {
     }
 
     pub fn pointer_up(&self, _pointer_event: &PointerState) {
-        self.active.set(false);
+        self.end_drag();
+    }
+
+    /// Stops the selection following the pointer, as the button's release
+    /// does: the pointer's moves select nothing more until the next press.
+    pub fn end_drag(&self) {
+        if self.active.get_untracked() {
+            self.active.set(false);
+        }
     }
 
     fn right_click(&self, pointer_event: &PointerState) {
