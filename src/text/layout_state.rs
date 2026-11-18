@@ -501,7 +501,9 @@ mod tests {
 
     /// A capital centred in a box has its ink's middle at the box's
     /// middle. Centring on the ascent put it low by half the room the font
-    /// keeps above its capitals: about 0.13em in San Francisco.
+    /// keeps above its capitals: about 0.13em in San Francisco. A font
+    /// that names no cap height is centred the same way, on its `H`:
+    /// DejaVu Sans, which Linux lays this out in, stayed 0.1em low.
     #[test]
     fn centred_text_puts_a_capitals_middle_at_the_boxs_middle() {
         use parley::layout::PositionedLayoutItem;

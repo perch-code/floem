@@ -38,6 +38,15 @@ thread_local! {
         RefCell::new(HashMap::new());
     static GLYPH_BITMAP_ROWS_CACHE: RefCell<HashMap<GlyphBitmapRowsKey, Option<(f32, f32)>>> =
         RefCell::new(HashMap::new());
+    static MEASURED_CAP_HEIGHT_CACHE: RefCell<HashMap<MeasuredCapHeightKey, Option<f32>>> =
+        RefCell::new(HashMap::new());
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct MeasuredCapHeightKey {
+    font_blob_id: u64,
+    font_index: u32,
+    normalized_coords: Vec<i16>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -811,7 +820,8 @@ impl TextLayout {
     /// from the top of the capitals to the baseline, so neither descenders
     /// nor the room a font's ascent keeps above its capitals move the text.
     /// A run of color bitmaps, emoji, counts as the rows its bitmaps cover.
-    /// A line whose fonts give no cap height falls back to its ascent.
+    /// A font that gives no cap height is measured by its `H`, and a line
+    /// whose fonts have neither falls back to its ascent.
     pub fn centering_bounds_y(&self) -> Option<(f32, f32)> {
         if self.layout.is_empty() {
             return None;
@@ -862,7 +872,8 @@ impl TextLayout {
 
 /// What a line is centred on, as its top and bottom from the baseline,
 /// y down: the union of each run's. A run of text spans the top of its
-/// capitals to the baseline, from its font at its size and variation. A
+/// capitals to the baseline, from its font at its size and variation, or
+/// from the font's `H` when it gives no cap height (`measured_cap_height`). A
 /// run of color bitmaps spans the rows they are drawn on, which need not
 /// end at the baseline: swash sets Apple Color Emoji's 0.125em below it,
 /// as Core Text does, while the font gives its cap height as a whole em.
@@ -897,11 +908,59 @@ fn line_centering_rows(line: &parley::layout::Line<'_, TextBrush>) -> Option<(f3
             .metrics(run.normalized_coords())
             .scale(run.font_size())
             .cap_height;
-        if cap > 0.0 {
+        let cap = if cap > 0.0 {
+            Some(cap)
+        } else {
+            measured_cap_height(font, run.font_size(), run.normalized_coords())
+        };
+        if let Some(cap) = cap {
             rows = union(rows, (-cap, 0.0));
         }
     }
     rows
+}
+
+/// The height of a font's capitals at `font_size`, taken from the outline
+/// of its `H`, for a font that names none; `None` when it has no `H` to
+/// measure.
+///
+/// The cap height is in version 2 of the OS/2 table, and a font with an
+/// older one gives zero: DejaVu Sans, the default on many Linux desktops.
+/// Its text was centred on the ascent instead, 0.1em low. A browser
+/// measures the `H` then, and so does this.
+fn measured_cap_height(font: &FontData, font_size: f32, normalized_coords: &[i16]) -> Option<f32> {
+    let key = MeasuredCapHeightKey {
+        font_blob_id: font.data.id(),
+        font_index: font.index,
+        normalized_coords: normalized_coords.to_vec(),
+    };
+    let per_em = MEASURED_CAP_HEIGHT_CACHE.with_borrow(|cache| cache.get(&key).copied());
+    let per_em = per_em.unwrap_or_else(|| {
+        let per_em = (|| {
+            let font_ref = FontRef::from_index(font.data.data(), font.index as usize)?;
+            let glyph_id = font_ref.charmap().map('H');
+            let units_per_em = f32::from(font_ref.metrics(&[]).units_per_em);
+            if glyph_id == 0 || units_per_em <= 0.0 {
+                return None;
+            }
+            // At a size of one em in font units, the outline is in font
+            // units too, unhinted as the text is drawn.
+            let top = OUTLINE_SCALE_CONTEXT.with_borrow_mut(|context| {
+                let mut scaler = context
+                    .builder(font_ref)
+                    .size(units_per_em)
+                    .normalized_coords(normalized_coords)
+                    .build();
+                Some(scaler.scale_outline(glyph_id)?.bounds().max.y)
+            })?;
+            (top > 0.0).then_some(top / units_per_em)
+        })();
+        MEASURED_CAP_HEIGHT_CACHE.with_borrow_mut(|cache| {
+            cache.insert(key, per_em);
+        });
+        per_em
+    });
+    per_em.map(|per_em| per_em * font_size)
 }
 
 /// The rows a glyph's color bitmap covers at `font_size`, as its top and
