@@ -1440,7 +1440,21 @@ fn editor_content(
                     if !cx.window_state.is_focused(id) {
                         return EventPropagation::Continue;
                     }
-                    if *key == Key::Named(NamedKey::Tab) {
+                    // Tab and the arrows are the editor's whether or not it
+                    // has a command for them, as a native text box never
+                    // gives up the keyboard on one. Off macOS, Alt with Left
+                    // or Right runs no command, and the default action
+                    // walked the focus off to a neighbour.
+                    if matches!(
+                        key,
+                        Key::Named(
+                            NamedKey::Tab
+                                | NamedKey::ArrowLeft
+                                | NamedKey::ArrowRight
+                                | NamedKey::ArrowUp
+                                | NamedKey::ArrowDown
+                        )
+                    ) {
                         cx.prevent_default();
                     }
                     // A key the editor ran a command for is the editor's, so

@@ -36,7 +36,22 @@ fn key(key: Key, code: Code, modifiers: Modifiers) -> Event {
     })
 }
 
-fn alt_arrow(name: NamedKey) -> Event {
+/// The modifier an arrow moves the cursor by a word with: Alt on macOS,
+/// Control everywhere else.
+const WORD: Modifiers = if cfg!(target_os = "macos") {
+    Modifiers::ALT
+} else {
+    Modifiers::CONTROL
+};
+
+const ARROWS: [NamedKey; 4] = [
+    NamedKey::ArrowLeft,
+    NamedKey::ArrowRight,
+    NamedKey::ArrowUp,
+    NamedKey::ArrowDown,
+];
+
+fn arrow(name: NamedKey, modifiers: Modifiers) -> Event {
     let code = match name {
         NamedKey::ArrowLeft => Code::ArrowLeft,
         NamedKey::ArrowRight => Code::ArrowRight,
@@ -44,18 +59,19 @@ fn alt_arrow(name: NamedKey) -> Event {
         NamedKey::ArrowDown => Code::ArrowDown,
         _ => unreachable!(),
     };
-    key(Key::Named(name), code, Modifiers::ALT)
+    key(Key::Named(name), code, modifiers)
 }
 
 fn offset(ed: &Editor) -> usize {
     ed.cursor.with(|c| c.offset())
 }
 
-/// Alt with an arrow moves the editor's cursor by a word, and is also the
-/// key floem's default action walks the focus with. The cursor used to
-/// move and then the focus left for a neighbour, taking the next keystroke.
+/// An arrow with the word modifier moves the editor's cursor by a word.
+/// On macOS that is Alt with an arrow, also the key floem's default action
+/// walks the focus with: the cursor used to move and then the focus left
+/// for a neighbour, taking the next keystroke.
 #[test]
-fn the_editor_keeps_the_keyboard_through_alt_arrows() {
+fn the_editor_keeps_the_keyboard_through_word_arrows() {
     let root = TestRoot::new();
     let view = text_editor(TEXT).style(|s| s.width(300.0).height(200.0));
     let ed = view.editor().clone();
@@ -63,29 +79,47 @@ fn the_editor_keeps_the_keyboard_through_alt_arrows() {
     let mut harness = between_buttons(root, view, id);
     assert_eq!(offset(&ed), 0);
 
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowLeft));
+    harness.dispatch_event(arrow(NamedKey::ArrowLeft, WORD));
     harness.rebuild();
     assert_eq!(offset(&ed), 0, "nothing to move to at the start");
     assert!(harness.is_focused(id), "and the focus stays put");
 
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowRight));
+    harness.dispatch_event(arrow(NamedKey::ArrowRight, WORD));
     harness.rebuild();
     assert_eq!(offset(&ed), 3, "to the end of the word");
     assert!(harness.is_focused(id));
 
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowRight));
+    harness.dispatch_event(arrow(NamedKey::ArrowRight, WORD));
     harness.rebuild();
     assert_eq!(offset(&ed), 9, "and of the next");
     assert!(harness.is_focused(id));
 
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowLeft));
+    harness.dispatch_event(arrow(NamedKey::ArrowLeft, WORD));
     harness.rebuild();
     assert_eq!(offset(&ed), 4, "back to the start of the word");
     assert!(harness.is_focused(id));
 }
 
+/// Alt with an arrow is the editor's on every platform. Off macOS the
+/// editor has no command for Alt with Left or Right, and the focus used
+/// to walk off with them.
 #[test]
-fn the_text_input_keeps_the_keyboard_through_alt_arrows() {
+fn the_editor_keeps_the_keyboard_through_alt_arrows() {
+    let root = TestRoot::new();
+    let view = text_editor(TEXT).style(|s| s.width(300.0).height(200.0));
+    let ed = view.editor().clone();
+    let id = ed.editor_view_id.get().expect("the editor's own view");
+    let mut harness = between_buttons(root, view, id);
+
+    for name in ARROWS {
+        harness.dispatch_event(arrow(name, Modifiers::ALT));
+        harness.rebuild();
+        assert!(harness.is_focused(id), "the focus left on Alt-{name:?}");
+    }
+}
+
+#[test]
+fn the_text_input_keeps_the_keyboard_through_word_arrows() {
     let root = TestRoot::new();
     let buffer = RwSignal::new(TEXT.to_string());
     let view = TextInput::new(buffer).style(|s| s.width(300.0));
@@ -94,17 +128,17 @@ fn the_text_input_keeps_the_keyboard_through_alt_arrows() {
 
     // The cursor starts at the front, with no word behind it: the input
     // has nothing to do with the key, and still keeps it.
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowLeft));
+    harness.dispatch_event(arrow(NamedKey::ArrowLeft, WORD));
     harness.rebuild();
     assert!(
         harness.is_focused(id),
         "nothing to move to, and the focus stays put"
     );
 
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowRight));
+    harness.dispatch_event(arrow(NamedKey::ArrowRight, WORD));
     harness.rebuild();
     assert!(harness.is_focused(id));
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowRight));
+    harness.dispatch_event(arrow(NamedKey::ArrowRight, WORD));
     harness.rebuild();
     assert!(harness.is_focused(id));
     harness.dispatch_event(key(
@@ -119,7 +153,7 @@ fn the_text_input_keeps_the_keyboard_through_alt_arrows() {
         "typed at the second word's end"
     );
 
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowLeft));
+    harness.dispatch_event(arrow(NamedKey::ArrowLeft, WORD));
     harness.rebuild();
     assert!(harness.is_focused(id));
     harness.dispatch_event(key(
@@ -133,9 +167,21 @@ fn the_text_input_keeps_the_keyboard_through_alt_arrows() {
         "the ?quick! brown fox",
         "typed at that word's start"
     );
+}
 
-    // An arrow the single-line input has no movement for is still its own.
-    harness.dispatch_event(alt_arrow(NamedKey::ArrowUp));
-    harness.rebuild();
-    assert!(harness.is_focused(id));
+/// Alt with an arrow is the input's on every platform, the arrows the
+/// single-line input has no movement for among them.
+#[test]
+fn the_text_input_keeps_the_keyboard_through_alt_arrows() {
+    let root = TestRoot::new();
+    let buffer = RwSignal::new(TEXT.to_string());
+    let view = TextInput::new(buffer).style(|s| s.width(300.0));
+    let id = view.view_id();
+    let mut harness = between_buttons(root, view, id);
+
+    for name in ARROWS {
+        harness.dispatch_event(arrow(name, Modifiers::ALT));
+        harness.rebuild();
+        assert!(harness.is_focused(id), "the focus left on Alt-{name:?}");
+    }
 }
