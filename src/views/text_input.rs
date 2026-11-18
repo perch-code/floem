@@ -146,6 +146,10 @@ pub struct TextInput {
     cursor_width: f64, // TODO: make this configurable
     is_focused: bool,
     last_pointer_down: Point,
+    /// Whether the pointer's moves still carry the selection: from a press
+    /// until its release, or until a key edits the text or moves the
+    /// cursor.
+    dragging: bool,
     last_cursor_action_on: Instant,
     last_ime_cursor_area: Option<(Point, Size)>,
     text_node: Option<taffy::NodeId>,
@@ -313,6 +317,7 @@ impl TextInput {
             cursor_width: 1.5,
             is_focused: false,
             last_pointer_down: Point::ZERO,
+            dragging: false,
             last_cursor_action_on: Instant::now(),
             last_ime_cursor_area: None,
             text_node: None,
@@ -1276,6 +1281,7 @@ impl View for TextInput {
                 }
                 let point = state.logical_point();
                 self.last_pointer_down = point;
+                self.dragging = true;
 
                 self.commit_preedit();
 
@@ -1292,7 +1298,8 @@ impl View for TextInput {
                 true
             }
             Event::Pointer(PointerEvent::Move(pu)) => {
-                if cx.window_state.has_capture(self.id)
+                if self.dragging
+                    && cx.window_state.has_capture(self.id)
                     && self.buffer.with_untracked(|buff| !buff.is_empty())
                 {
                     if self.commit_preedit() {
@@ -1339,7 +1346,16 @@ impl View for TextInput {
                             | NamedKey::ArrowDown
                     )
                 );
+                // A key that edits the text or moves the cursor ends a
+                // drag. A trackpad's tap-drag and three-finger drag hold
+                // the button for a moment after the fingers lift, so the
+                // key can come before the release, and the pointer's next
+                // move selected again from the cursor the key left.
+                let before = (self.cursor_glyph_idx, self.selection_byte_range());
                 let handled = self.handle_key_down(cx.window_state, ke);
+                if handled || before != (self.cursor_glyph_idx, self.selection_byte_range()) {
+                    self.dragging = false;
+                }
                 if arrow {
                     cx.prevent_default();
                 }
